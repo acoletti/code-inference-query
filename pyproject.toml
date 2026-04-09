@@ -1,0 +1,21 @@
+[project]
+name = "code-inference-query"
+version = "0.1.0"
+description = "MCP server for querying code inference corpus by shorthand citation or natural language"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.0"]
+
+[project.optional-dependencies]
+dev = ["build"]
+vector = ["lancedb>=0.3", "fastembed>=0.2"]
+
+[project.scripts]
+code-inference-query = "code_inference_query.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_inference_query"]
