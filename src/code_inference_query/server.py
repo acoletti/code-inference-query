@@ -10,7 +10,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from .indexer import Section, build_index
-from .search import _format_results, search
+from .search import _format_results, _parse_citation, search
 from .vector_store import build_vector_store, vector_search
 
 logger = logging.getLogger(__name__)
@@ -102,8 +102,8 @@ def query(
     max_tokens = max(1, min(max_tokens, _MAX_TOKENS_CEILING))
     max_chars = max_tokens * _CHARS_PER_TOKEN  # compute once; used by both search paths
 
-    # Citation queries (contain §) go straight to keyword-based exact search.
-    if "§" in query:
+    # Citation queries (recognised shorthand + § or section ref) skip vector search.
+    if _parse_citation(query)[0] is not None:
         return search(index, query, max_chars=max_chars, top_k=top_k)
 
     # Natural-language queries: try vector search, fall back to keyword search.

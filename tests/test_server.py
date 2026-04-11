@@ -202,20 +202,36 @@ class TestNaturalLanguageRouting:
 
 
 # ---------------------------------------------------------------------------
-# Characterization: § sign in NL queries misroutes (known heuristic limitation)
+# § routing: only recognised citation patterns skip vector search
 # ---------------------------------------------------------------------------
 
 class TestSectionSignHeuristic:
-    """Document the known behaviour: any query containing § routes to citation search.
+    """Only queries with a recognised shorthand route to citation search.
 
-    This is a characterization test — it documents existing behaviour, not a bug fix.
-    A NL query like 'what does § mean?' will silently use citation routing.
+    A bare § without a known shorthand (e.g. 'what does § mean?') must go
+    through the normal NL / vector path, not citation search.
     """
 
-    def test_nl_query_with_section_sign_routes_to_search_not_vector(self):
+    def test_nl_query_with_bare_section_sign_uses_vector_path(self):
+        """'what does § mean?' has no shorthand — must not short-circuit to search()."""
+        mock_table = MagicMock()
+        with patch("code_inference_query.server._get_index", return_value=[_make_section()]):
+            with patch("code_inference_query.server._get_vector_store", return_value=mock_table):
+                with patch(
+                    "code_inference_query.server.vector_search",
+                    return_value=[_make_section()],
+                ) as mock_vec:
+                    with patch(
+                        "code_inference_query.server._format_results", return_value=""
+                    ):
+                        query("what does § mean in python?")
+        mock_vec.assert_called_once()
+
+    def test_valid_citation_with_section_sign_skips_vector(self):
+        """'CC §Functions' has a recognised shorthand — must skip vector search."""
         with patch("code_inference_query.server._get_index", return_value=[_make_section()]):
             with patch("code_inference_query.server.search", return_value="") as mock_search:
                 with patch("code_inference_query.server.vector_search") as mock_vec:
-                    query("what does § mean in python?")
+                    query("CC §Functions")
         mock_search.assert_called_once()
         mock_vec.assert_not_called()

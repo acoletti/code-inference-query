@@ -97,6 +97,7 @@ def _score_section(section: Section, query_tokens: list[str]) -> float:
 
 def _truncate_content(content: str, max_chars: int = 6000) -> str:
     """Truncate content to approximately max_chars, breaking at line boundaries."""
+    max_chars = max(1, max_chars)
     if len(content) <= max_chars:
         return content
     # Find the last newline before max_chars
