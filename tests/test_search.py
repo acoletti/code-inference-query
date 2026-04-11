@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from code_inference_query.indexer import Section
-from code_inference_query.search import SearchBackend, _score_section, search
+from code_inference_query.search import _parse_citation, _score_section, search
 
 _VECTOR_DEPS = importlib.util.find_spec("lancedb") and importlib.util.find_spec("fastembed")
 
@@ -101,23 +101,54 @@ class TestSearch(unittest.TestCase):
         )
         self.assertEqual(_score_section(section, ["database", "schema", "migration"]), 0.0)
 
-    def test_search_backend_protocol_satisfied(self) -> None:
-        # Verify SearchBackend is a structural Protocol — any object with the
-        # right signature satisfies it without explicit inheritance.
-        class _StubBackend:
-            def search(
-                self,
-                sections: list[Section],
-                query: str,
-                max_chars: int,
-                top_k: int,
-            ) -> str:
-                return ""
+    def test_parse_citation_bare_shorthand_returns_none(self) -> None:
+        # After no-§ branch removal, bare shorthand NL queries must not parse as citations.
+        shorthand, ref = _parse_citation("CC-Py generators")
+        self.assertIsNone(shorthand)
+        self.assertIsNone(ref)
 
-        def _accepts_backend(b: SearchBackend) -> str:
-            return b.search([], "q", 100, 1)
+    def test_parse_citation_with_section_sign_parses_correctly(self) -> None:
+        shorthand, ref = _parse_citation("CC-Py §Functions.2")
+        self.assertEqual(shorthand, "CC-Py")
+        self.assertEqual(ref, "Functions.2")
 
-        self.assertEqual(_accepts_backend(_StubBackend()), "")
+    def test_bare_shorthand_nl_query_routes_to_scoped_nl_search(self) -> None:
+        # "CC-Py generators" must route to scoped NL search, not citation lookup.
+        sections = [
+            Section(
+                corpus_id="clean-code-python",
+                shorthand="CC-Py",
+                chapter="Generators",
+                section_name="Generators",
+                citation="CC-Py §Generators",
+                content="Generator functions use yield.",
+                line_start=1,
+                keywords={"generator", "generators", "yield"},
+            )
+        ]
+        result = search(sections, "CC-Py generators", max_tokens=200, top_k=1)
+        self.assertIn("CC-Py §Generators", result)
+
+    def test_format_results_respects_max_chars_budget(self) -> None:
+        # The old 1000-char floor caused output to massively exceed the budget.
+        # With 3 sections and max_chars=30, each section must get ~10 chars, not 1000.
+        from code_inference_query.search import _format_results
+        sections = [
+            Section(
+                corpus_id="fluent-python",
+                shorthand="FP2e",
+                chapter="Ch1",
+                section_name=f"Section{i}",
+                citation=f"FP2e §Section{i}",
+                content="x" * 2000,
+                line_start=1,
+                keywords=set(),
+            )
+            for i in range(3)
+        ]
+        result = _format_results(sections, max_chars=30)
+        # Must not approach 3000 chars (old buggy output with 1000-char floor × 3 sections)
+        self.assertLess(len(result), 500)
 
 
 @unittest.skipUnless(_VECTOR_DEPS, "lancedb and fastembed required for vector tests")

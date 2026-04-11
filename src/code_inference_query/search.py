@@ -3,20 +3,10 @@
 from __future__ import annotations
 
 import re
-from typing import Protocol
 
 from .corpus_config import CORPUS_SPECS
 from .indexer import Section
 
-
-class SearchBackend(Protocol):
-    def search(
-        self,
-        sections: list[Section],
-        query: str,
-        max_chars: int,
-        top_k: int,
-    ) -> str: ...
 
 # Derive shorthands from the single source of truth in corpus_config
 KNOWN_SHORTHANDS = {spec.shorthand for spec in CORPUS_SPECS}
@@ -53,14 +43,13 @@ def _tokenize_query(q: str) -> list[str]:
 
 
 def _parse_citation(q: str) -> tuple[str | None, str | None]:
-    """Try to parse a shorthand citation like 'CC-Py §Functions.2' or 'Google §2.7'."""
-    # Match: SHORTHAND §SECTION
-    m = re.match(rf"({_SHORTHAND_ALTERNATION})\s*§\s*(.+)", q.strip())
-    if m:
-        return m.group(1), m.group(2).strip()
+    """Try to parse a shorthand citation like 'CC-Py §Functions.2' or 'Google §2.7'.
 
-    # Match: SHORTHAND SECTION (without §)
-    m = re.match(rf"({_SHORTHAND_ALTERNATION})\s+(.+)", q.strip())
+    The § sigil is required to distinguish explicit citations from scoped
+    natural-language queries (e.g. "CC-Py generators"). Bare shorthand-prefixed
+    queries are handled by the scope-detection path in search().
+    """
+    m = re.match(rf"({_SHORTHAND_ALTERNATION})\s*§\s*(.+)", q.strip())
     if m:
         return m.group(1), m.group(2).strip()
 
@@ -189,7 +178,7 @@ def _search_by_citation(
     query_tokens = _tokenize_query(section_ref)
     scored = [(s, _score_section(s, query_tokens)) for s in corpus_sections]
     scored.sort(key=lambda x: x[1], reverse=True)
-    top = [s for s, score in scored[:3] if score > 0]
+    top = [s for s, score in scored[:3] if score > 0]  # exclude zero-score misses
     if top:
         return _format_results(top, max_chars)
 
@@ -237,7 +226,7 @@ def _format_result(section: Section, max_chars: int) -> str:
 
 def _format_results(sections: list[Section], max_chars: int) -> str:
     """Format multiple section results, dividing max_chars among them."""
-    per_section_chars = max(max_chars // len(sections), 1000)
+    per_section_chars = max_chars // len(sections)
     parts = []
     for s in sections:
         content = _truncate_content(s.content, per_section_chars)

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from .corpus_config import CORPUS_SPECS
 from .indexer import Section, build_index
 from .search import _format_results, _parse_citation, search
 from .vector_store import build_vector_store, vector_search
@@ -92,8 +92,6 @@ def query(
         query: The query string — a shorthand citation (e.g. "CC-Py §Functions.2")
                or natural language (e.g. "decorator pattern python").
         max_tokens: Target response size in tokens (approximate). Default 1500, max 4000.
-            Note: values below ~250 may return minimal content due to internal
-            per-section floors in the search layer.
         top_k: Number of sections to return for natural language queries. Default 3, max 20.
 
     Returns:
@@ -104,7 +102,9 @@ def query(
     top_k = max(1, min(top_k, _TOP_K_CEILING))
     max_chars = max_tokens * _CHARS_PER_TOKEN  # compute once; used by both search paths
 
-    # Citation queries (recognised shorthand + § or section ref) skip vector search.
+    # Citation queries (shorthand + §) skip vector search. Note: _parse_citation is
+    # called here to route and then called again inside search() — both call sites
+    # must stay in sync on what constitutes a valid citation.
     if _parse_citation(query)[0] is not None:
         return search(index, query, max_chars=max_chars, top_k=top_k)
 
@@ -133,7 +133,6 @@ def list_corpora() -> str:
         up to 3 example citations per corpus to aid query construction.
     """
     index = _get_index()
-    from .corpus_config import CORPUS_SPECS
     lines = [
         "| Shorthand | Corpus | Sections | Example citations |",
         "|-----------|--------|----------|-------------------|",

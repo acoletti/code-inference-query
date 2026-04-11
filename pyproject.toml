@@ -4,11 +4,11 @@ version = "0.1.0"
 description = "MCP server for querying code inference corpus by shorthand citation or natural language"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["mcp>=1.0"]
+dependencies = ["mcp>=1.0,<2.0"]
 
 [project.optional-dependencies]
-dev = ["build"]
-vector = ["lancedb>=0.3", "fastembed>=0.2"]
+dev = ["build", "pytest"]
+vector = ["lancedb>=0.3,<1.0", "fastembed>=0.2,<1.0"]
 
 [project.scripts]
 code-inference-query = "code_inference_query.server:main"
