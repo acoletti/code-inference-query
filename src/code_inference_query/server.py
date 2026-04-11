@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -11,6 +12,8 @@ from mcp.server.fastmcp import FastMCP
 from .indexer import Section, build_index
 from .search import _format_results, search
 from .vector_store import build_vector_store, vector_search
+
+logger = logging.getLogger(__name__)
 
 # Resolve corpus path from env or default
 _DEFAULT_CORPUS_PATH = os.path.expanduser(
@@ -23,6 +26,13 @@ CORPUS_PATH = Path(
 )
 
 mcp = FastMCP("code-inference-query")
+
+# Token / character budget constants.
+# _CHARS_PER_TOKEN: rough token-to-char ratio used throughout; matches search.py:118.
+# _MAX_TOKENS_CEILING: cap for the max_tokens parameter (~16k chars), avoids
+#   oversized MCP tool responses and guards against non-positive caller values.
+_CHARS_PER_TOKEN = 4
+_MAX_TOKENS_CEILING = 4000
 
 # Module-level index — built on first query (lazy)
 _index: list[Section] | None = None
@@ -39,6 +49,10 @@ def _get_vector_store():
         try:
             _vector_store = build_vector_store(_get_index())
         except Exception:
+            logger.warning(
+                "build_vector_store failed; vector search unavailable for this process",
+                exc_info=True,
+            )
             _vector_store = _VECTOR_STORE_UNAVAILABLE
     if _vector_store is _VECTOR_STORE_UNAVAILABLE:
         return None
@@ -59,7 +73,7 @@ def _get_index() -> list[Section]:
 
 @mcp.tool()
 def query(
-    q: str,
+    query: str,  # named 'query' to match the FastMCP schema field exposed to clients
     max_tokens: int = 1500,
     top_k: int = 3,
 ) -> str:
@@ -74,31 +88,38 @@ def query(
       - "generator delegation yield from" → natural language search across all corpora
 
     Args:
-        q: The query string — a shorthand citation (e.g. "CC-Py §Functions.2")
-           or natural language (e.g. "decorator pattern python").
-        max_tokens: Target response size in tokens (approximate). Default 1500.
+        query: The query string — a shorthand citation (e.g. "CC-Py §Functions.2")
+               or natural language (e.g. "decorator pattern python").
+        max_tokens: Target response size in tokens (approximate). Default 1500, max 4000.
+            Note: values below ~250 may return minimal content due to internal
+            per-section floors in the search layer.
         top_k: Number of sections to return for natural language queries. Default 3.
 
     Returns:
         Matching corpus excerpts formatted with citation headers.
     """
     index = _get_index()
+    max_tokens = max(1, min(max_tokens, _MAX_TOKENS_CEILING))
+    max_chars = max_tokens * _CHARS_PER_TOKEN  # compute once; used by both search paths
 
     # Citation queries (contain §) go straight to keyword-based exact search.
-    if "§" in q:
-        return search(index, q, max_tokens=max_tokens, top_k=top_k)
+    if "§" in query:
+        return search(index, query, max_chars=max_chars, top_k=top_k)
 
     # Natural-language queries: try vector search, fall back to keyword search.
     try:
         table = _get_vector_store()
         if table is not None:
-            nl_sections = vector_search(table, index, q, top_k)
+            nl_sections = vector_search(table, index, query, top_k)
             if nl_sections:
-                return _format_results(nl_sections, max_tokens * 4)
+                return _format_results(nl_sections, max_chars)
     except Exception:
-        pass
+        logger.error(
+            "vector_search failed, falling back to keyword search",
+            exc_info=True,
+        )
 
-    return search(index, q, max_tokens=max_tokens, top_k=top_k)
+    return search(index, query, max_chars=max_chars, top_k=top_k)
 
 
 @mcp.tool()

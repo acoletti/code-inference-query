@@ -113,9 +113,11 @@ def search(
     query: str,
     max_tokens: int = 1500,
     top_k: int = 3,
+    max_chars: int | None = None,
 ) -> str:
     """Search the corpus index and return formatted results."""
-    max_chars = max_tokens * 4  # rough token-to-char ratio
+    if max_chars is None:
+        max_chars = max_tokens * 4  # rough token-to-char ratio
 
     shorthand, section_ref = _parse_citation(query)
 
