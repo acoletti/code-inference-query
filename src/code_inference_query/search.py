@@ -178,7 +178,7 @@ def _search_by_citation(
     query_tokens = _tokenize_query(section_ref)
     scored = [(s, _score_section(s, query_tokens)) for s in corpus_sections]
     scored.sort(key=lambda x: x[1], reverse=True)
-    top = [s for s, score in scored[:3] if score > 0]  # exclude zero-score misses
+    top = [s for s, score in scored[:3] if score >= 0.1]  # exclude noise / zero-score misses
     if top:
         return _format_results(top, max_chars)
 

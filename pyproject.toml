@@ -8,7 +8,7 @@ dependencies = ["mcp>=1.0,<2.0"]
 
 [project.optional-dependencies]
 dev = ["build", "pytest"]
-vector = ["lancedb>=0.3,<1.0", "fastembed>=0.2,<1.0"]
+vector = ["lancedb>=0.3,<1.0", "fastembed>=0.2,<0.4"]
 
 [project.scripts]
 code-inference-query = "code_inference_query.server:main"
