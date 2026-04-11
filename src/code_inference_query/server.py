@@ -33,6 +33,7 @@ mcp = FastMCP("code-inference-query")
 #   oversized MCP tool responses and guards against non-positive caller values.
 _CHARS_PER_TOKEN = 4
 _MAX_TOKENS_CEILING = 4000
+_TOP_K_CEILING = 20
 
 # Module-level index — built on first query (lazy)
 _index: list[Section] | None = None
@@ -93,13 +94,14 @@ def query(
         max_tokens: Target response size in tokens (approximate). Default 1500, max 4000.
             Note: values below ~250 may return minimal content due to internal
             per-section floors in the search layer.
-        top_k: Number of sections to return for natural language queries. Default 3.
+        top_k: Number of sections to return for natural language queries. Default 3, max 20.
 
     Returns:
         Matching corpus excerpts formatted with citation headers.
     """
     index = _get_index()
     max_tokens = max(1, min(max_tokens, _MAX_TOKENS_CEILING))
+    top_k = max(1, min(top_k, _TOP_K_CEILING))
     max_chars = max_tokens * _CHARS_PER_TOKEN  # compute once; used by both search paths
 
     # Citation queries (recognised shorthand + § or section ref) skip vector search.
@@ -124,25 +126,44 @@ def query(
 
 @mcp.tool()
 def list_corpora() -> str:
-    """List all available corpora and their shorthands.
+    """List all available corpora, their shorthands, and example citations.
 
     Returns:
-        A formatted table of corpus IDs, shorthands, and descriptions.
+        A formatted table of corpus IDs, shorthands, section counts, and
+        up to 3 example citations per corpus to aid query construction.
     """
     index = _get_index()
-    # Collect unique corpora
-    seen = {}
-    for s in index:
-        if s.corpus_id not in seen:
-            seen[s.corpus_id] = s.shorthand
     from .corpus_config import CORPUS_SPECS
-    lines = ["| Shorthand | Corpus | Sections |", "|-----------|--------|----------|"]
+    lines = [
+        "| Shorthand | Corpus | Sections | Example citations |",
+        "|-----------|--------|----------|-------------------|",
+    ]
     for spec in CORPUS_SPECS:
-        count = sum(1 for s in index if s.shorthand == spec.shorthand)
-        lines.append(f"| `{spec.shorthand}` | {spec.description} | {count} |")
+        corpus_sections = [s for s in index if s.shorthand == spec.shorthand]
+        count = len(corpus_sections)
+        examples = ", ".join(f"`{s.citation}`" for s in corpus_sections[:3])
+        lines.append(f"| `{spec.shorthand}` | {spec.description} | {count} | {examples} |")
     lines.append(f"\n**Total sections indexed**: {len(index)}")
     lines.append(f"**Corpus path**: `{CORPUS_PATH}`")
     return "\n".join(lines)
+
+
+@mcp.tool()
+def reload() -> str:
+    """Reload the corpus index and vector store from disk.
+
+    Use after editing corpus files to pick up changes without restarting
+    the MCP server process. The vector store is cleared and will be rebuilt
+    lazily on the next natural-language query.
+
+    Returns:
+        A summary confirming the section count after reload.
+    """
+    global _index, _vector_store
+    _index = None
+    _vector_store = None  # reset sentinel so next NL query rebuilds the store
+    index = _get_index()
+    return f"Reloaded {len(index)} sections from `{CORPUS_PATH}`."
 
 
 def main():
