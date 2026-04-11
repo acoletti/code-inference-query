@@ -167,6 +167,16 @@ def reload() -> str:
 
 
 def main():
+    # Warm up index and vector store at startup so the first query doesn't pay
+    # the build latency. Corpus-missing errors are caught and logged; the server
+    # starts regardless and will surface a clear error on the first query.
+    try:
+        _get_vector_store()
+    except Exception:
+        logger.warning(
+            "Startup warmup failed; index will be built on first query",
+            exc_info=True,
+        )
     mcp.run(transport="stdio")
 
 

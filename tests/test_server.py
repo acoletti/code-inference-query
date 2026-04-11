@@ -354,3 +354,99 @@ class TestListCorpora:
         result = self._run_list_corpora([_make_section()])
         assert "| Shorthand |" in result
         assert "| Example citations |" in result
+
+
+# ---------------------------------------------------------------------------
+# Startup warmup
+# ---------------------------------------------------------------------------
+
+class TestStartupWarmup:
+    """main() must attempt to warm up the vector store before mcp.run()."""
+
+    def test_warmup_called_before_mcp_run(self):
+        call_order = []
+        with patch(
+            "code_inference_query.server._get_vector_store",
+            side_effect=lambda: call_order.append("warmup"),
+        ):
+            with patch(
+                "code_inference_query.server.mcp.run",
+                side_effect=lambda **kw: call_order.append("run"),
+            ):
+                from code_inference_query.server import main
+                main()
+        assert call_order == ["warmup", "run"]
+
+    def test_warmup_failure_does_not_prevent_server_start(self):
+        """A corpus-missing error at warmup must be swallowed so mcp.run() still fires."""
+        ran = []
+        with patch(
+            "code_inference_query.server._get_vector_store",
+            side_effect=RuntimeError("corpus missing"),
+        ):
+            with patch(
+                "code_inference_query.server.mcp.run",
+                side_effect=lambda **kw: ran.append(True),
+            ):
+                from code_inference_query.server import main
+                main()
+        assert ran == [True]
+
+
+# ---------------------------------------------------------------------------
+# NL score threshold (search.py)
+# ---------------------------------------------------------------------------
+
+class TestNLScoreThreshold:
+    """_search_natural_language must filter out low-confidence matches."""
+
+    def _run_nl_search(self, sections, query_str, top_k=5):
+        from code_inference_query.search import _NL_SCORE_THRESHOLD, _search_natural_language
+        return _search_natural_language(sections, query_str, max_chars=4000, top_k=top_k)
+
+    def _make_matching_section(self, name="generators"):
+        """Section whose name and keywords strongly match 'generators'."""
+        from code_inference_query.indexer import Section
+        return Section(
+            corpus_id="test",
+            shorthand="CC",
+            chapter="Ch1",
+            section_name=name,
+            citation=f"CC §{name}",
+            content=f"Content about {name} in depth.",
+            line_start=0,
+            keywords={name, "generators", "yield"},
+        )
+
+    def _make_unrelated_section(self):
+        """Section with no overlap with 'generators yield delegation'."""
+        from code_inference_query.indexer import Section
+        return Section(
+            corpus_id="test",
+            shorthand="CC",
+            chapter="Ch2",
+            section_name="Unrelated Topic",
+            citation="CC §Unrelated",
+            content="Completely unrelated content about databases.",
+            line_start=0,
+            keywords={"database", "sql", "schema"},
+        )
+
+    def test_high_scoring_section_is_returned(self):
+        sections = [self._make_matching_section("generators")]
+        result = self._run_nl_search(sections, "generators yield delegation")
+        assert "generators" in result.lower()
+
+    def test_low_scoring_section_is_filtered(self):
+        """A section with no keyword overlap must not appear in results."""
+        sections = [self._make_unrelated_section()]
+        result = self._run_nl_search(sections, "generators yield delegation")
+        assert "No relevant sections found" in result
+
+    def test_threshold_filters_weak_from_mixed_set(self):
+        """Only the strong match should appear when mixed with a weak one."""
+        good = self._make_matching_section("generators")
+        bad = self._make_unrelated_section()
+        result = self._run_nl_search([good, bad], "generators yield delegation")
+        assert "generators" in result.lower()
+        assert "Unrelated" not in result

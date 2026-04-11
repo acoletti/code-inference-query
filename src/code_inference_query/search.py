@@ -26,6 +26,12 @@ _SHORTHAND_ALTERNATION = "|".join(
     sorted((re.escape(s) for s in KNOWN_SHORTHANDS), key=len, reverse=True)
 )
 
+# Minimum score for a section to appear in natural-language results.
+# Score = coverage × mean_bonus; a single keyword match on a 2-token query
+# gives ~0.5, so this threshold filters out sections that match only one of
+# several query tokens at low signal strength.
+_NL_SCORE_THRESHOLD = 0.5
+
 STOPWORDS = frozenset({
     "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
     "have", "has", "had", "do", "does", "did", "will", "would", "could",
@@ -209,7 +215,7 @@ def _search_natural_language(
 
     scored = [(s, _score_section(s, tokens)) for s in sections]
     scored.sort(key=lambda x: x[1], reverse=True)
-    top = [s for s, score in scored[:top_k] if score > 0]
+    top = [s for s, score in scored[:top_k] if score >= _NL_SCORE_THRESHOLD]
 
     if not top:
         scope_msg = f" in {scope}" if scope else ""
